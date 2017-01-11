@@ -9,6 +9,10 @@ use hyper::client::Request;
 use hyper::method::Method;
 use hyper::Url;
 use ring::{digest, hmac};
+use rustc_serialize::hex::ToHex;
+use rustc_serialize::base64;
+use rustc_serialize::base64::ToBase64;
+use rustc_serialize::hex::FromHex;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -53,8 +57,6 @@ impl EncodeSet for CANONICAL_PERCENT_ENCODE_SET {
 
 fn main() {
     let cfg = read_configuration().unwrap();
-    println!("{:?}", cfg);
-
     let u = auth_token(&cfg);
     println!("url {}", u);
 }
@@ -128,12 +130,12 @@ fn authorize_signature<W>(cfg: &Config, request: &Request<W>, auth_params: &mut 
         } else {
             "".to_string()
         });
-    let signing_key = &utf8_percent_encode(&cfg.general.consumer_secret, CANONICAL_PERCENT_ENCODE_SET).to_string();
+    let signing_key = &(utf8_percent_encode(&cfg.general.consumer_secret, CANONICAL_PERCENT_ENCODE_SET).to_string() + "&" /* incorporate oauth secret if there is one*/);
     calc_signature(signing_key, &sig_base)
 }
 
 fn calc_signature(signing_key: &str, signing_base: &str) -> String {
-    let s_key = hmac::SigningKey::new(&digest::SHA256, signing_key.as_ref());
+    let s_key = hmac::SigningKey::new(&digest::SHA1, signing_key.as_ref());
     let signature = hmac::sign(&s_key, signing_base.as_bytes());
-    str::from_utf8(signature.as_ref()).unwrap().to_string()
+    signature.as_ref().to_hex().from_hex().unwrap().to_base64(base64::STANDARD)
 }
