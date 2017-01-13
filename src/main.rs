@@ -5,6 +5,7 @@ extern crate toml;
 extern crate url;
 extern crate uuid;
 
+use hyper::header::Authorization;
 use hyper::client::Request;
 use hyper::method::Method;
 use hyper::Url;
@@ -76,31 +77,55 @@ fn read_configuration() -> Result<Config, ConfigurationError> {
 
 fn auth_token(cfg: &Config) -> String {
     let url = Url::parse(AUTH_TOKEN_URL).unwrap();
-    let request = Request::new(Method::Post, url).unwrap();
-
-    // Setup required params for auth token
-    let mut auth_params = Vec::new();
-    auth_params.push(("oauth_callback".to_string(), "oob".to_string()));
-    auth_params.push(("oauth_consumer_key".to_string(), cfg.general.consumer_key.clone()));
-    auth_params.push(("oauth_nonce".to_string(), format!("{}", Uuid::new_v4().simple())));
-    auth_params.push(("oauth_signature_method".to_string(), "HMAC-SHA1".to_string()));
-    auth_params.push(("oauth_timestamp".to_string(),
-                      SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string()));
-    auth_params.push(("oauth_version".to_string(), "1.0".to_string()));
+    let mut request = Request::new(Method::Post, url).unwrap();
 
     // Generate signature
-    authorize_signature(cfg, &request, &mut auth_params)
+    let auth_header = authorize_signature(cfg, &mut request);
+    println!("{}", auth_header);
+
+    {
+        let headers = request.headers_mut();
+        headers.set(Authorization(auth_header));
+    }
+
+    let stream = request.start().unwrap();
+    println!("{}", stream.headers());
+
+    let mut response = stream.send().unwrap();
+    println!("{}", response.headers);
+
+    let mut buf = String::new();
+    response.read_to_string(&mut buf);
+    println!("{:?}", buf);
+
+    "".to_string()
 }
 
 /// Creates an authorization request of the form specified in Twitter docs:
 ///
 /// https://dev.twitter.com/oauth/overview/creating-signatures
 ///
-fn authorize_signature<W>(cfg: &Config, request: &Request<W>, auth_params: &mut Vec<(String, String)>) -> String {
+fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>) -> String {
     let url = &request.url;
     let method = request.method().to_string().to_uppercase();
 
-    // Get query pairs, sorted
+    // Setup required params for auth token. Keep this set separate since we need to build the auth header later with these.
+    let mut auth_params = vec![
+        ("oauth_callback",         "oob"),
+        ("oauth_consumer_key",     &cfg.general.consumer_key.clone()),
+        ("oauth_nonce",            &format!("{}", Uuid::new_v4().simple())),
+        ("oauth_signature_method", "HMAC-SHA1"),
+        ("oauth_timestamp",        &SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string()),
+        ("oauth_version",          "1.0")
+    ].iter().map(|kv| {
+        (utf8_percent_encode(&kv.0, CANONICAL_PERCENT_ENCODE_SET).to_string(),
+         utf8_percent_encode(&kv.1, CANONICAL_PERCENT_ENCODE_SET).to_string())
+    }).collect::<Vec<(String, String)>>();
+
+    // save a copy to build the actual header at the end of this rigmarole
+    let mut auth_params_orig = auth_params.clone();
+
+    // Combine query pairs and
     let mut pairs = url.query_pairs()
         .map(|kv| {
             (utf8_percent_encode(&kv.0.into_owned(), CANONICAL_PERCENT_ENCODE_SET).to_string(),
@@ -108,14 +133,12 @@ fn authorize_signature<W>(cfg: &Config, request: &Request<W>, auth_params: &mut 
         })
         .collect::<Vec<(String, String)>>();
 
-    // OAuth parameters
-    pairs.append(auth_params);
-
     // sort the encoded keys
-    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    auth_params.append(&mut pairs);
+    auth_params.sort_by(|a, b| a.0.cmp(&b.0));
 
     let params =
-        pairs.iter().map(|kv| format!("{}={}", kv.0, kv.1)).collect::<Vec<String>>().join("&");
+        auth_params.iter().map(|kv| format!("{}={}", kv.0, kv.1)).collect::<Vec<String>>().join("&");
 
     let base_url = utf8_percent_encode(&format!("{}://{}{}",
                                                 url.scheme(),
@@ -130,11 +153,26 @@ fn authorize_signature<W>(cfg: &Config, request: &Request<W>, auth_params: &mut 
         } else {
             "".to_string()
         });
+    println!("{}", sig_base);
+
     let signing_key = &(utf8_percent_encode(&cfg.general.consumer_secret, CANONICAL_PERCENT_ENCODE_SET).to_string() + "&" /* incorporate oauth secret if there is one*/);
-    calc_signature(signing_key, &sig_base)
+    let signature = calc_signature(signing_key, &sig_base);
+
+    auth_params_orig.push(("oauth_signature".to_string(),
+                           utf8_percent_encode(&signature, CANONICAL_PERCENT_ENCODE_SET).to_string()));
+    auth_params_orig.sort_by(|a, b| a.0.cmp(&b.0));
+    // Whew! Finally create the OAuth header value
+    auth_header(auth_params_orig)
+}
+
+fn auth_header(auth_params: Vec<(String, String)>) -> String {
+    "OAuth ".to_string() + &auth_params.iter().map(|kv| {
+        format!(r#"{}="{}""#, kv.0, kv.1)
+    }).collect::<Vec<String>>().join(",")
 }
 
 fn calc_signature(signing_key: &str, signing_base: &str) -> String {
+    println!("{} {}", signing_key, signing_base);
     let s_key = hmac::SigningKey::new(&digest::SHA1, signing_key.as_ref());
     let signature = hmac::sign(&s_key, signing_base.as_bytes());
     signature.as_ref().to_hex().from_hex().unwrap().to_base64(base64::STANDARD)
