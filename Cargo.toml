@@ -5,8 +5,10 @@ authors = ["Jeff Simpson <jeff@syncrodoka.net>"]
 
 [dependencies]
 hyper = "0.9"
+mime = "0.2.2"
 ring = "0.6.1"
 rustc-serialize = "0.3.0"
 toml = "0.2.1"
 url = "1.2.4"
 uuid = { version = "0.2", features = ["serde", "v4"] }
+webbrowser = "0.1.3"
