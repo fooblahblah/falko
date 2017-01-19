@@ -1,5 +1,5 @@
-#[macro_use]
 extern crate hyper;
+extern crate regex;
 extern crate ring;
 extern crate rustc_serialize;
 extern crate toml;
@@ -11,6 +11,7 @@ use hyper::header::{Authorization, ContentLength, ContentType};
 use hyper::client::Request;
 use hyper::method::Method;
 use hyper::{Client, Url};
+use regex::Regex;
 use ring::{digest, hmac};
 use rustc_serialize::hex::ToHex;
 use rustc_serialize::base64;
@@ -36,6 +37,12 @@ struct GeneralConfig {
     consumer_secret: String,
 }
 
+#[derive(Debug, RustcDecodable)]
+struct OAuthAccessTokens {
+    oauth_token: String,
+    oauth_token_secret: String,
+}
+
 #[derive(Debug)]
 enum ConfigurationError {
     Io(io::Error),
@@ -56,8 +63,6 @@ impl EncodeSet for CANONICAL_PERCENT_ENCODE_SET {
     }
 }
 
-header! { (OAuthVerifier, "oauth_verifier") => [String] }
-
 type OAuthToken = String;
 
 static ACCESS_TOKEN_URL: &'static str = "https://api.twitter.com/oauth/access_token";
@@ -67,10 +72,9 @@ static AUTHORIZE_URL: &'static str = "https://api.twitter.com/oauth/authorize";
 fn main() {
     let cfg = read_configuration().unwrap();
     let token = auth_token(&cfg);
-    // authorize(&token);
-    // let pin = read_pin().unwrap();
-    // access_token(&cfg, &pin, &token);
-    access_token(&cfg, "9456042", &token);
+    authorize(&token);
+    let pin = read_pin().unwrap();
+    println!("{:?}", access_token(&cfg, &pin, &token));
 }
 
 fn read_configuration() -> Result<Config, ConfigurationError> {
@@ -89,13 +93,15 @@ fn read_configuration() -> Result<Config, ConfigurationError> {
 fn read_pin() -> io::Result<String> {
     let mut input = String::new();
 
-    println!("Enter authorization PIN");
-
-    try!(io::stdin().read_line(&mut input));
-    let pin = input.trim();
-    println!("You typed: {}", pin);
-
-    Ok(pin.to_owned())
+    print!("Enter authorization PIN> ");
+    match io::stdout().flush() {
+        Ok(_) => {
+            try!(io::stdin().read_line(&mut input));
+            let pin = input.trim();
+            Ok(pin.to_owned())
+        }
+        Err(e) => Err(e)
+    }
 }
 
 fn auth_token(cfg: &Config) -> Option<OAuthToken> {
@@ -137,12 +143,10 @@ fn authorize(oauth_token: &Option<OAuthToken>) -> () {
     ()
 }
 
-fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> () {
+fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> Result<OAuthAccessTokens, String> {
     let url = Url::parse(ACCESS_TOKEN_URL).unwrap();
     // let url = Url::parse("http://localhost:8080/oauth/access_token").unwrap();
     let mut request = Request::new(Method::Post, url).unwrap();
-
-    let oauth_verifier = format!("oauth_verifier={}", pin);
 
     // Generate signature
     let auth_header = authorize_signature(cfg, &mut request, oauth_token, &Some(pin.to_string()));
@@ -151,13 +155,9 @@ fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> ()
     {
         let headers = request.headers_mut();
         headers.set(Authorization(auth_header));
-        headers.set(OAuthVerifier(pin.to_string()));
-        // headers.set(ContentType("application/x-www-form-urlencoded".parse().unwrap()));
-        // headers.set(ContentLength(oauth_verifier.len() as u64));
     }
 
-    let mut stream = request.start().unwrap();
-    stream.write(oauth_verifier.as_bytes());
+    let stream = request.start().unwrap();
     println!("{}", stream.headers());
 
     let mut response = stream.send().unwrap();
@@ -165,11 +165,17 @@ fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> ()
 
     let mut buf = String::new();
     match response.read_to_string(&mut buf) {
-        Ok(_) => println!("{:?}", buf),
-        Err(e) => {
-            println!("Error reading response: {:?}", e);
-        }
+        Ok(_) => Ok(parse_access_tokens(&buf)),
+        e @ Err(_) => Err(format!("Error reading response: {:?}", e))
     }
+}
+
+fn parse_access_tokens(buf: &str) -> OAuthAccessTokens {
+    let re_token = Regex::new(r"oauth_token=([^&]+)").unwrap();
+    let oauth_token = re_token.captures(buf).map(|c| c.get(1).unwrap().as_str());
+    let re_secret = Regex::new(r"oauth_token_secret=([^&]+)").unwrap();
+    let oauth_token_secret = re_secret.captures(buf).map(|c| c.get(1).unwrap().as_str());
+    OAuthAccessTokens { oauth_token: oauth_token.unwrap().to_string(), oauth_token_secret: oauth_token_secret.unwrap().to_string() }
 }
 
 /// Creates an authorization request of the form specified in Twitter docs:

@@ -6,6 +6,7 @@ authors = ["Jeff Simpson <jeff@syncrodoka.net>"]
 [dependencies]
 hyper = "0.9"
 mime = "0.2.2"
+regex = "0.2"
 ring = "0.6.1"
 rustc-serialize = "0.3.0"
 toml = "0.2.1"
