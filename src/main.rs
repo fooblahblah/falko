@@ -71,10 +71,12 @@ static AUTHORIZE_URL: &'static str = "https://api.twitter.com/oauth/authorize";
 
 fn main() {
     let cfg = read_configuration().unwrap();
+    // Initial call to get an oauth_token to begin the authorization process
     let token = auth_token(&cfg);
-    authorize(&token);
-    let pin = read_pin().unwrap();
-    println!("{:?}", access_token(&cfg, &pin, &token));
+    // Authorize spawns a browser window on Twitter so the user can authorize the app.
+    // They are prompted to input the displayed PIN to continue.
+    let pin = authorize(&token);
+    println!("{:?}", access_token(&cfg, &pin.unwrap(), &token));
 }
 
 fn read_configuration() -> Result<Config, ConfigurationError> {
@@ -135,12 +137,17 @@ fn auth_token(cfg: &Config) -> Option<OAuthToken> {
 
 }
 
-fn authorize(oauth_token: &Option<OAuthToken>) -> () {
+fn authorize(oauth_token: &Option<OAuthToken>) -> Result<String, io::Error> {
     match *oauth_token {
-        Some(ref token) => webbrowser::open(&format!("{}?oauth_token={}", AUTHORIZE_URL, token)).is_ok(),
-        None => false
-    };
-    ()
+        Some(ref token) => {
+            webbrowser::open(&format!("{}?oauth_token={}", AUTHORIZE_URL, token)).map(|r| {
+                // Read the PIN via stdin
+                read_pin().unwrap()
+            })
+        },
+        _ => Err(io::Error::new(io::ErrorKind::Other, "Undefined OAuthToken"))
+
+    }
 }
 
 fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> Result<OAuthAccessTokens, String> {
