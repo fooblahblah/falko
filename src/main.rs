@@ -109,7 +109,7 @@ fn auth_token(cfg: &Config) -> Option<OAuthToken> {
     let mut request = Request::new(Method::Post, url).unwrap();
 
     // Generate signature
-    let auth_header = authorize_signature(cfg, &mut request, &None, &None);
+    let auth_header = authorize_signature(cfg, &mut request, &None);
 
     {
         let headers = request.headers_mut();
@@ -144,12 +144,11 @@ fn authorize(oauth_token: &Option<OAuthToken>) -> () {
 }
 
 fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> Result<OAuthAccessTokens, String> {
-    let url = Url::parse(ACCESS_TOKEN_URL).unwrap();
-    // let url = Url::parse("http://localhost:8080/oauth/access_token").unwrap();
+    let url = Url::parse(&format!("{}?oauth_verifier={}", ACCESS_TOKEN_URL, pin)).unwrap();
     let mut request = Request::new(Method::Post, url).unwrap();
 
     // Generate signature
-    let auth_header = authorize_signature(cfg, &mut request, oauth_token, &Some(pin.to_string()));
+    let auth_header = authorize_signature(cfg, &mut request, oauth_token);
 
     // Tack on auth header
     {
@@ -182,7 +181,7 @@ fn parse_access_tokens(buf: &str) -> OAuthAccessTokens {
 ///
 /// https://dev.twitter.com/oauth/overview/creating-signatures
 ///
-fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &Option<OAuthToken>, oauth_verifier: &Option<String>) -> String {
+fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &Option<OAuthToken>) -> String {
     let url = &request.url;
     let method = request.method().to_string().to_uppercase();
 
@@ -202,12 +201,6 @@ fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &
     // If OAuthToken is defined add it to auth params
     match *oauth_token {
         Some(ref token) => auth_params.push(("oauth_token".to_string(), utf8_percent_encode(&token, CANONICAL_PERCENT_ENCODE_SET).to_string())),
-        None => ()
-    }
-
-    // If OAuthToken is defined add it to auth params
-    match *oauth_verifier {
-        Some(ref verifier) => auth_params.push(("oauth_verifier".to_string(), utf8_percent_encode(&verifier, CANONICAL_PERCENT_ENCODE_SET).to_string())),
         None => ()
     }
 
@@ -266,7 +259,7 @@ fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &
 fn auth_header(auth_params: Vec<(String, String)>) -> String {
     "OAuth ".to_string() + &auth_params.iter().map(|kv| {
         format!(r#"{}="{}""#, kv.0, kv.1)
-    }).collect::<Vec<String>>().join(",")
+    }).collect::<Vec<String>>().join(", ")
 }
 
 fn calc_signature(signing_key: &str, signing_base: &str) -> String {
