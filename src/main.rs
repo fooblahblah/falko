@@ -39,8 +39,8 @@ struct GeneralConfig {
 
 #[derive(Debug, RustcDecodable)]
 struct OAuthAccessTokens {
-    oauth_token: OAuthToken,
-    oauth_token_secret: OAuthTokenSecret,
+    oauth_token: Option<OAuthToken>,
+    oauth_token_secret: Option<OAuthTokenSecret>,
 }
 
 #[derive(Debug)]
@@ -78,11 +78,11 @@ fn main() {
     // Authorize spawns a browser window on Twitter so the user can authorize the app.
     // They are prompted to input the displayed PIN to continue.
     let pin = authorize(&token);
-    let consumer_tokens = access_token(&cfg, &pin.unwrap(), &token);
+    let consumer_tokens = access_token(&cfg, &pin.unwrap(), &OAuthAccessTokens { oauth_token: token, oauth_token_secret: None });
     println!("{:?}", consumer_tokens);
 
     consumer_tokens.map(|tokens| {
-        println!("{:?}", home_timeline(&cfg, &Some(tokens.oauth_token), &Some(tokens.oauth_token_secret)))
+        println!("{:?}", home_timeline(&cfg, &tokens))
     });
 }
 
@@ -113,12 +113,12 @@ fn read_pin() -> io::Result<String> {
     }
 }
 
-fn home_timeline(cfg: &Config, oauth_token: &Option<OAuthToken>, oauth_token_secret: &Option<OAuthTokenSecret>) -> String {
+fn home_timeline(cfg: &Config, tokens: &OAuthAccessTokens) -> String {
     let url = Url::parse(HOME_TIMELINE_URL).unwrap();
     let mut request = Request::new(Method::Get, url).unwrap();
 
     // Generate signature
-    let auth_header = authorize_signature(cfg, &mut request, oauth_token, oauth_token_secret);
+    let auth_header = authorize_signature(cfg, &mut request, tokens);
 
     // Tack on auth header
     {
@@ -142,7 +142,7 @@ fn auth_token(cfg: &Config) -> Option<OAuthToken> {
     let mut request = Request::new(Method::Post, url).unwrap();
 
     // Generate signature
-    let auth_header = authorize_signature(cfg, &mut request, &None, &None);
+    let auth_header = authorize_signature(cfg, &mut request, &OAuthAccessTokens { oauth_token: None, oauth_token_secret: None });
 
     {
         let headers = request.headers_mut();
@@ -180,12 +180,12 @@ fn authorize(oauth_token: &Option<OAuthToken>) -> Result<String, io::Error> {
     }
 }
 
-fn access_token(cfg: &Config, pin: &str, oauth_token: &Option<OAuthToken>) -> Result<OAuthAccessTokens, String> {
+fn access_token(cfg: &Config, pin: &str, tokens: &OAuthAccessTokens) -> Result<OAuthAccessTokens, String> {
     let url = Url::parse(&format!("{}?oauth_verifier={}", ACCESS_TOKEN_URL, pin)).unwrap();
     let mut request = Request::new(Method::Post, url).unwrap();
 
     // Generate signature
-    let auth_header = authorize_signature(cfg, &mut request, oauth_token, &None);
+    let auth_header = authorize_signature(cfg, &mut request, tokens);
 
     // Tack on auth header
     {
@@ -211,14 +211,14 @@ fn parse_access_tokens(buf: &str) -> OAuthAccessTokens {
     let oauth_token = re_token.captures(buf).map(|c| c.get(1).unwrap().as_str());
     let re_secret = Regex::new(r"oauth_token_secret=([^&]+)").unwrap();
     let oauth_token_secret = re_secret.captures(buf).map(|c| c.get(1).unwrap().as_str());
-    OAuthAccessTokens { oauth_token: oauth_token.unwrap().to_string(), oauth_token_secret: oauth_token_secret.unwrap().to_string() }
+    OAuthAccessTokens { oauth_token: oauth_token.map(|t| t.to_string()), oauth_token_secret: oauth_token_secret.map(|t| t.to_string()) }
 }
 
 /// Creates an authorization request of the form specified in Twitter docs:
 ///
 /// https://dev.twitter.com/oauth/overview/creating-signatures
 ///
-fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &Option<OAuthToken>, oauth_token_secret: &Option<OAuthTokenSecret>) -> String {
+fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, tokens: &OAuthAccessTokens) -> String {
     let url = &request.url;
     let method = request.method().to_string().to_uppercase();
 
@@ -236,7 +236,7 @@ fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &
     }).collect::<Vec<(String, String)>>();
 
     // If OAuthToken is defined add it to auth params
-    match *oauth_token {
+    match tokens.oauth_token {
         Some(ref token) => auth_params.push(("oauth_token".to_string(), utf8_percent_encode(&token, CANONICAL_PERCENT_ENCODE_SET).to_string())),
         None => ()
     }
@@ -279,7 +279,7 @@ fn authorize_signature<W>(cfg: &Config, request: &mut Request<W>, oauth_token: &
         });
 
     // percent_encode the oauth token
-    let token_secret = match *oauth_token_secret {
+    let token_secret = match tokens.oauth_token_secret {
         Some(ref secret) => utf8_percent_encode(&secret, CANONICAL_PERCENT_ENCODE_SET).to_string(),
         None => "".to_string()
     };
