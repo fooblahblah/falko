@@ -1,16 +1,20 @@
+// #[macro_use]
+// extern crate serde_derive;
+
 extern crate hyper;
 extern crate regex;
 extern crate ring;
 extern crate rustc_serialize;
+extern crate serde_json;
 extern crate toml;
 extern crate url;
 extern crate uuid;
 extern crate webbrowser;
 
-use hyper::header::{Authorization, ContentLength, ContentType};
+use hyper::header::Authorization;
 use hyper::client::Request;
 use hyper::method::Method;
-use hyper::{Client, Url};
+use hyper::Url;
 use regex::Regex;
 use ring::{digest, hmac};
 use rustc_serialize::hex::ToHex;
@@ -29,6 +33,7 @@ use uuid::Uuid;
 #[derive(Debug, RustcDecodable)]
 struct Config {
     general: GeneralConfig,
+    oauth: OAuthAccessTokens,
 }
 
 #[derive(Debug, RustcDecodable)]
@@ -73,17 +78,18 @@ static HOME_TIMELINE_URL: &'static str = "https://api.twitter.com/1.1/statuses/h
 
 fn main() {
     let cfg = read_configuration().unwrap();
-    // Initial call to get an oauth_token to begin the authorization process
-    let token = auth_token(&cfg);
-    // Authorize spawns a browser window on Twitter so the user can authorize the app.
-    // They are prompted to input the displayed PIN to continue.
-    let pin = authorize(&token);
-    let consumer_tokens = access_token(&cfg, &pin.unwrap(), &OAuthAccessTokens { oauth_token: token, oauth_token_secret: None });
-    println!("{:?}", consumer_tokens);
 
-    consumer_tokens.map(|tokens| {
-        println!("{:?}", home_timeline(&cfg, &tokens))
-    });
+    if cfg.oauth.oauth_token.is_none() {
+        // Initial call to get an oauth_token to begin the authorization process
+        let token = auth_token(&cfg);
+        // Authorize spawns a browser window on Twitter so the user can authorize the app.
+        // They are prompted to input the displayed PIN to continue.
+        let pin = authorize(&token);
+        let consumer_tokens = access_token(&cfg, &pin.unwrap(), &OAuthAccessTokens { oauth_token: token, oauth_token_secret: None });
+        println!("{:?}", consumer_tokens);
+    } else {
+        println!("TODO save these. In the meantime you should edit ~/.falko.toml and add these: {:?}", home_timeline(&cfg, &cfg.oauth));
+    }
 }
 
 fn read_configuration() -> Result<Config, ConfigurationError> {
