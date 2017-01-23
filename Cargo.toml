@@ -3,14 +3,17 @@ name = "falko"
 version = "0.1.0"
 authors = ["Jeff Simpson <jeff@syncrodoka.net>"]
 
+#[build-dependencies]
+#serde_codegen = "0.8"
+
 [dependencies]
 hyper = "0.9"
 mime = "0.2.2"
 regex = "0.2"
 ring = "0.6.1"
 rustc-serialize = "0.3.0"
-#serde_derive = "0.9.0-rc2"
-serde_json = "0.8"
+#serde_derive = "0.8"
+#serde_json = "0.8"
 toml = { version = "0.2.1", features = ["serde"] }
 url = "1.2.4"
 uuid = { version = "0.2", features = ["serde", "v4"] }
