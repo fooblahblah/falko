@@ -13,6 +13,8 @@ use hyper::header::Authorization;
 use hyper::client::Request;
 use hyper::method::Method;
 use hyper::Url;
+use rustc_serialize::json;
+use rustc_serialize::json::{DecodeResult, Json};
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -41,12 +43,22 @@ pub struct OAuthAccessTokens {
     oauth_token_secret: Option<OAuthTokenSecret>,
 }
 
+
+#[derive(Debug, RustcDecodable)]
+pub struct HomeTimeline {
+    tweets: Vec<Tweet>,
+}
+
+#[derive(Debug, RustcDecodable)]
+pub struct Tweet {
+    text: String,
+}
+
 #[derive(Debug)]
 enum ConfigurationError {
     Io(io::Error),
     ParseError,
 }
-
 
 type OAuthToken = String;
 type OAuthTokenSecret = String;
@@ -63,9 +75,9 @@ fn main() {
         // They are prompted to input the displayed PIN to continue.
         let pin = authorize(&token);
         let consumer_tokens = access_token(&cfg, &pin.unwrap(), &OAuthAccessTokens { oauth_token: token, oauth_token_secret: None });
-        println!("{:?}", consumer_tokens);
+        println!("TODO save these. In the meantime you should edit ~/.falko.toml and add these: {:?}", consumer_tokens);
     } else {
-        println!("TODO save these. In the meantime you should edit ~/.falko.toml and add these: {:?}", home_timeline(&cfg, &cfg.oauth));
+        println!("{:?}", home_timeline(&cfg, &cfg.oauth));
     }
 }
 
@@ -96,8 +108,8 @@ fn read_pin() -> io::Result<String> {
     }
 }
 
-fn home_timeline(cfg: &Config, tokens: &OAuthAccessTokens) -> String {
-    let url = Url::parse(HOME_TIMELINE_URL).unwrap();
+fn home_timeline(cfg: &Config, tokens: &OAuthAccessTokens) -> HomeTimeline {
+    let url = Url::parse(&format!("{}?count=5&exlcude_replies=true&include_entities=false", HOME_TIMELINE_URL)).unwrap();
     let mut request = Request::new(Method::Get, url).unwrap();
 
     // Generate signature
@@ -117,7 +129,17 @@ fn home_timeline(cfg: &Config, tokens: &OAuthAccessTokens) -> String {
 
     let mut buf = String::new();
     response.read_to_string(&mut buf);
-    buf
+
+    let js = Json::from_str(&buf).unwrap();
+    let arr = js.as_array().unwrap();
+
+    // println!("{}", arr.len());
+
+    let tweets = arr.iter().map(|obj| {
+        let text = obj.find("text").map_or(None, |s| s.as_string());
+        Tweet { text: text.unwrap().to_string() }
+    }).collect::<Vec<_>>();
+    HomeTimeline { tweets: tweets }
 }
 
 fn auth_token(cfg: &Config) -> Option<OAuthToken> {
