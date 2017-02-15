@@ -1,13 +1,11 @@
-use hyper::method::Method;
 use hyper::client::Request;
-use hyper::Url;
 use regex::Regex;
 use ring::{ digest, hmac };
 use rustc_serialize::hex::ToHex;
 use rustc_serialize::base64;
 use rustc_serialize::base64::ToBase64;
 use rustc_serialize::hex::FromHex;
-use super::{ Config, OAuthToken, OAuthAccessTokens };
+use super::{ Config, OAuthAccessTokens };
 use std::time::*;
 use url::percent_encoding::*;
 use uuid::Uuid;
