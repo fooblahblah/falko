@@ -3,11 +3,9 @@ name = "falko"
 version = "0.1.0"
 authors = ["Jeff Simpson <jeff@syncrodoka.net>"]
 
-#[build-dependencies]
-#serde_codegen = "0.8"
-
 [dependencies]
 hyper = "0.9"
+jmespath = "^0.1.1"
 log = "0.3.6"
 mime = "0.2.2"
 regex = "0.2"

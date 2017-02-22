@@ -1,6 +1,7 @@
 mod oauth;
 
 extern crate hyper;
+extern crate jmespath;
 extern crate regex;
 extern crate ring;
 extern crate rustc_serialize;
@@ -21,7 +22,7 @@ use hyper::header::Authorization;
 use hyper::client::Request;
 use hyper::method::Method;
 use hyper::Url;
-use rustc_serialize::json::Json;
+use rustc_serialize::json;
 use slog::*;
 use std::fs::File;
 use std::io;
@@ -59,6 +60,9 @@ pub struct HomeTimeline {
 
 #[derive(Debug, RustcDecodable)]
 pub struct Tweet {
+    created_at: String,
+    name: String,
+    screen_name: String,
     text: String,
 }
 
@@ -213,27 +217,18 @@ fn home_timeline(cfg: &Config, tokens: &OAuthAccessTokens) -> HomeTimeline {
     let mut buf = String::new();
     let _ = response.read_to_string(&mut buf);
 
-    // let s = r#"
-    // {
-    //   "tweets" : [
-    //     {
-    //       "text" : "foo",
-    //       "extra" : true
-    //     }
-    //   ]
-    // }
-    // "#;
-    // let timeline: HomeTimeline = json::decode(&s).unwrap();
-    // println!("{:?}", timeline);
+    // Extract the fields from the tweet we care about right now
+    let expr = jmespath::compile("[*].{ text: text, created_at: created_at, name: user.name, screen_name: user.screen_name }").unwrap();
+    let js = jmespath::Variable::from_json(&buf).unwrap();
 
-    let js = Json::from_str(&buf).unwrap();
-    let arr = js.as_array().unwrap();
+    // Use search expression to extract an object and unwrap as a Tweet
+    let result = expr.search(js).unwrap();
 
-    debug!("{}", arr.len());
-
+    let arr = result.as_array().unwrap();
     let tweets = arr.iter().map(|obj| {
-        let text = obj.find("text").map_or(None, |s| s.as_string());
-        Tweet { text: text.unwrap().to_string() }
+        let tweet: Tweet = json::decode(&obj.to_string()).unwrap();
+        tweet
     }).collect::<Vec<_>>();
+
     HomeTimeline { tweets: tweets }
 }
